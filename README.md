@@ -9,9 +9,37 @@ Inspired by the [Handmade Hero](https://handmadehero.org/) project by Casey Mura
 
 - Creates a native Win32 window using `RegisterClassW` and `CreateWindowEx`
 - Handles core window messages (`WM_PAINT`, `WM_SIZE`, `WM_CLOSE`, `WM_DESTROY`, `WM_ACTIVATEAPP`)
-- Paints the window alternating between black and white on each resize using `PatBlt`
-- Logs window events to the debug output via `OutputDebugStringA`
-- Runs a standard Win32 message loop with `GetMessage` / `TranslateMessage` / `DispatchMessage`
+- Allocates a **DIB (Device Independent Bitmap) back buffer** — a region of memory where pixels can be written directly
+- Resizes the back buffer automatically whenever the window is resized (`WM_SIZE`)
+- Blits the back buffer to the window every frame using `StretchDIBits`
+- Logs window events to the debug output via `OutputDebugStringA` (visible in DebugView or VS Output window)
+- Uses a `Running` boolean flag to control the main loop — either `WM_CLOSE` or `WM_DESTROY` sets it to `false` to exit cleanly
+
+---
+
+## Code Architecture
+
+### Macros (readability helpers)
+```cpp
+#define internal        static   // function only visible in this file
+#define local_persist   static   // variable persists across calls
+#define global_variable static   // file-scope global
+```
+
+### Global State
+| Variable | Type | Purpose |
+|---|---|---|
+| `Running` | `bool` | Controls the main message loop |
+| `BitmapInfo` | `BITMAPINFO` | Describes the DIB format (width, height, bit depth) |
+| `BitmapMemory` | `void*` | Raw pointer to the pixel data |
+| `BITMAPHANDLE` | `HBITMAP` | GDI handle to the DIB bitmap |
+| `BitmapDeviceContext` | `HDC` | Off-screen DC used to hold the DIB |
+
+### Key Functions
+- **`ResizeDIBSection(Width, Height)`** — Frees the old bitmap, creates a new 32-bit DIB section sized to the window, and stores a pointer to its pixel memory
+- **`Win32UpdateWindow(DC, X, Y, Width, Height)`** — Calls `StretchDIBits` to copy the back buffer to the real window DC
+- **`Win32MainWindowCallback(...)`** — Handles all window messages; resizes the buffer on `WM_SIZE`, blits on `WM_PAINT`, sets `Running = false` on close/destroy
+- **`wWinMain(...)`** — Registers the window class, creates the window, runs the message loop while `Running` is `true`
 
 ---
 
@@ -19,7 +47,7 @@ Inspired by the [Handmade Hero](https://handmadehero.org/) project by Casey Mura
 
 ```
 handmade/
-├── handmade.cpp          # Main source file — entry point + window callback
+├── handmade.cpp          # Main source file — entry point, window callback, rendering
 ├── handmade.h            # Main header (includes Windows.h)
 ├── framework.h           # Precompiled header framework
 ├── targetver.h           # Windows version targeting
@@ -47,14 +75,22 @@ handmade/
 3. Press **Ctrl+Shift+B** to build
 4. Press **F5** to run
 
+### Viewing Debug Output
+- In Visual Studio: **View → Output** → set dropdown to **"Debug"**
+- Outside VS: use [Sysinternals DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview)
+
 ---
 
 ## Roadmap / Coming Soon
 
-- [ ] Pixel back buffer (DIB section) for direct pixel rendering
+- [x] Basic Win32 window with message loop
+- [x] DIB back buffer (32-bit pixel memory allocated and resized with the window)
+- [x] `StretchDIBits` blit from back buffer to window
+- [x] Clean exit via `Running` flag
+- [ ] Write actual pixel colors into `BitmapMemory` (gradients, patterns)
 - [ ] Game loop using `PeekMessage` for continuous frame updates
 - [ ] Keyboard and mouse input handling
-- [ ] Software rendering / drawing shapes and gradients
+- [ ] Software rendering — shapes, gradients, sprites
 - [ ] Audio output
 
 ---
@@ -62,6 +98,6 @@ handmade/
 ## Notes
 
 - No external libraries or dependencies — only the Windows SDK
+- The DIB is 32-bit (`biBitCount = 32`), giving 4 bytes per pixel (Blue, Green, Red, unused/alpha)
 - The window class uses `CS_OWNDC | CS_HREDRAW | CS_VREDRAW` so the entire window repaints on every resize
-- Debug output is visible in Visual Studio's **Output** window (View → Output) while running under the debugger
-
+- `BitmapDeviceContext` is created once and reused — it is never released during the lifetime of the app
